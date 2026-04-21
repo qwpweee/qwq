@@ -1,0 +1,136 @@
+* ==============================================================
+* Programmable Gain Amplifier (PGA) - Multisim SPICE Netlist
+* 可编程增益放大器 - 增益 1/2/3/4 倍自动循环切换
+* --------------------------------------------------------------
+* Clock(NE555) -> Counter(74LS161) -> Decoder(74LS138)
+*    -> Analog Switch(CC4066) -> Feedback Resistor Select
+*    -> Op-Amp(LM324) Inverting Amplifier
+*    -> BCD Display(CD4511 + Common-Cathode 7-Segment)
+*
+* Import to Multisim: File -> Open -> select this .cir file.
+* Built-in Multisim models will be auto-matched for:
+*   NE555, 74LS161, 74LS138, CC4066, LM324, CD4511, 7-SEG_DIG
+* ==============================================================
+
+.TITLE Programmable Gain Amplifier (PGA 1x/2x/3x/4x)
+
+* ---------- Global Power Supplies ----------
+V_VCC    VCC   0   DC  +5V
+V_VEE    VEE   0   DC  -5V
+V_GND    GND   0   DC  0
+
+* ---------- Signal Source Ui (for test) ----------
+* 100mV peak, 1kHz sine input
+V_IN     UI    0   SIN(0 0.1 1k 0 0)
+
+* ==============================================================
+* (1) NE555 -- Astable Oscillator (~1 Hz clock)
+*     f = 1.44 / ((Ra + 2*Rb) * C1) ~= 0.98Hz
+* ==============================================================
+R_A      VCC       N555_DISC  10k
+R_B      N555_DISC N555_THR   68k
+C1_555   N555_THR  0          10u
+C2_555   N555_CTL  0          0.01u
+
+* NE555 subcircuit pin order:
+*   1:GND  2:TRIG  3:OUT  4:RESET  5:CTRL  6:THRES  7:DISCH  8:VCC
+X_U1_555 0 N555_THR CLK VCC N555_CTL N555_THR N555_DISC VCC NE555
+
+* ==============================================================
+* (2) 74LS161 -- 4-bit Binary Counter (use QA, QB only)
+*     CLK <- NE555 output
+*     CLR=LOAD=ENP=ENT=VCC (always counting)
+* ==============================================================
+* 74LS161 pin order (typical subckt):
+*   CLK LOAD ENT ENP CLR A B C D QA QB QC QD RCO VCC GND
+X_U2_161 CLK VCC VCC VCC VCC 0 0 0 0 QA QB QC QD RCO VCC 0 74LS161
+
+* ==============================================================
+* (3) 74LS138 -- 3-to-8 Decoder (use Y0~Y3, low-active)
+*     A<-QA  B<-QB  C<-GND   G1=VCC  G2A=G2B=GND
+* ==============================================================
+* 74LS138 pin order (typical subckt):
+*   A B C G2A G2B G1 Y0 Y1 Y2 Y3 Y4 Y5 Y6 Y7 VCC GND
+X_U3_138 QA QB 0 0 0 VCC Y0N Y1N Y2N Y3N Y4N Y5N Y6N Y7N VCC 0 74LS138
+
+* ==============================================================
+* (4) Inverters -- convert Y0N~Y3N (active LOW) to HIGH enable
+*     for CC4066 control pins
+* ==============================================================
+* Using 74LS04 hex inverter sections; one package covers 4 lines
+* Pin order: 1A 1Y 2A 2Y 3A 3Y 4A 4Y 5A 5Y 6A 6Y VCC GND
+X_U4_INV Y0N CTL0 Y1N CTL1 Y2N CTL2 Y3N CTL3 0 OPEN1 0 OPEN2 VCC 0 74LS04
+
+* ==============================================================
+* (5) CC4066 -- Quad Bilateral Analog Switch
+*     Each switch routes feedback node (FB) to one of Rf resistors
+*     CTL0 -> Rf1 (gain 1x), CTL1 -> Rf2 (gain 2x),
+*     CTL2 -> Rf3 (gain 3x), CTL3 -> Rf4 (gain 4x)
+* ==============================================================
+* CC4066 pin order (one chip, 4 switches):
+*   1IN 1OUT 1CTL 2IN 2OUT 2CTL 3IN 3OUT 3CTL 4IN 4OUT 4CTL VDD VSS
+X_U5_4066 FB RF1_L CTL0 FB RF2_L CTL1 FB RF3_L CTL2 FB RF4_L CTL3 VCC 0 CC4066
+
+* ---- Feedback Resistors: Rf = Rin * Gain, with Rin = 1k ----
+Rf1  RF1_L UO 1k     ; gain = 1
+Rf2  RF2_L UO 2k     ; gain = 2
+Rf3  RF3_L UO 3k     ; gain = 3
+Rf4  RF4_L UO 4k     ; gain = 4
+
+* ==============================================================
+* (6) LM324 -- Inverting Amplifier (core gain stage)
+*     Uo = -(Rf/Rin) * Ui
+*     Rin = 1k, Rf switched by CC4066
+*     +IN biased to GND via 10k (virtual ground reference)
+* ==============================================================
+Rin      UI  FB   1k
+R_BIAS   NP  0    10k
+
+* LM324 single op-amp subcircuit pin order:
+*   IN+  IN-  V+  V-  OUT
+X_U6_OP  NP  FB  VCC  VEE  UO  LM324
+
+* ==============================================================
+* (7) CD4511 -- BCD-to-7-Segment Decoder (common cathode drive)
+*     A<-QA, B<-QB, C<-GND, D<-GND  -> display "0","1","2","3"
+*     LT=BI=VCC (no test/blank), LE=GND (latch transparent)
+* ==============================================================
+* CD4511 pin order (typical subckt):
+*   A B C D LT BI LE Qa Qb Qc Qd Qe Qf Qg VCC GND
+X_U7_4511 QA QB 0 0 VCC VCC 0 SEGA SEGB SEGC SEGD SEGE SEGF SEGG VCC 0 CD4511
+
+* ==============================================================
+* (8) 7-Segment Common-Cathode Display
+*     220 ohm series current-limit resistors on each segment
+* ==============================================================
+R_SA  SEGA  LA  220
+R_SB  SEGB  LB  220
+R_SC  SEGC  LC  220
+R_SD  SEGD  LD  220
+R_SE  SEGE  LE  220
+R_SF  SEGF  LF  220
+R_SG  SEGG  LG  220
+
+* Use LED diodes to approximate segments (common cathode -> GND)
+D_SA  LA  0  LED_RED
+D_SB  LB  0  LED_RED
+D_SC  LC  0  LED_RED
+D_SD  LD  0  LED_RED
+D_SE  LE  0  LED_RED
+D_SF  LF  0  LED_RED
+D_SG  LG  0  LED_RED
+
+* ---------- Generic LED model (if library model absent) ----------
+.MODEL LED_RED D(IS=1E-15 N=1.8 RS=5 BV=5 IBV=10u)
+
+* ==============================================================
+* (9) Analysis Commands
+* ==============================================================
+* Transient analysis: run 10 seconds to observe a few gain cycles
+.TRAN 1m 10 0 1m UIC
+
+* Save key waveforms
+.PRINT TRAN V(UI) V(UO) V(CLK) V(QA) V(QB)
+.PROBE
+
+.END
